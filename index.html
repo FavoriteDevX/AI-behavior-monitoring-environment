@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rogue Agent Monitor</title>
+<style>
+  :root {
+    --bg: #04060a;
+    --panel: #080c13;
+    --panel-2: #0b1019;
+    --line: #172030;
+    --line-2: #22304a;
+    --text: #c9d4e3;
+    --dim: #5d6b80;
+    --cyan: #00f0ff;
+    --red: #ff2a3d;
+    --amber: #ffb020;
+    --green: #3dff8a;
+    --violet: #a58bff;
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--mono); }
+  body { overflow: hidden; }
+  button { font-family: inherit; }
+
+  #app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; height: 100dvh; }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #0a0f18 0%, #05080d 100%);
+    position: relative; z-index: 3;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .rec { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--red); letter-spacing: .15em; font-weight: 700; }
+  .rec i { width: 9px; height: 9px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); animation: blink 1.2s steps(2) infinite; }
+  .title { line-height: 1.1; }
+  .title h1 { margin: 0; font-size: 17px; letter-spacing: .32em; font-weight: 800; color: #fff; text-shadow: 0 0 18px rgba(0,240,255,.35); white-space: nowrap; }
+  .title h1 b { color: var(--red); text-shadow: 0 0 18px rgba(255,42,61,.6); }
+  .title p { margin: 3px 0 0; font-size: 10px; letter-spacing: .25em; color: var(--dim); text-transform: uppercase; }
+  .stats { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+  .stat { background: var(--panel); border: 1px solid var(--line); padding: 5px 10px; min-width: 82px; }
+  .stat .k { font-size: 9px; letter-spacing: .2em; color: var(--dim); }
+  .stat .v { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat.red .v { color: var(--red); }
+  .stat.cyan .v { color: var(--cyan); }
+  .stat.amber .v { color: var(--amber); }
+  .stat.risk { min-width: 190px; display: grid; grid-template-columns: 1fr auto; column-gap: 8px; align-items: center; }
+  .stat.risk canvas { grid-row: span 2; width: 74px; height: 30px; }
+  #riskLevel { font-size: 13px; }
+  header.critical { animation: alarm 1s ease-in-out infinite; }
+
+  /* ---------- main ---------- */
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 390px; min-height: 0; }
+  #stage { position: relative; min-height: 0; overflow: hidden; background: #030509; }
+  #world { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #world.hover { cursor: pointer; }
+  .fx-scan, .fx-grain, .fx-vignette { position: absolute; inset: 0; pointer-events: none; }
+  .fx-scan { background: repeating-linear-gradient(180deg, rgba(255,255,255,.025) 0 1px, transparent 1px 3px); mix-blend-mode: overlay; }
+  .fx-grain { opacity: .07; animation: grain .5s steps(5) infinite; }
+  .fx-vignette { background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.65) 100%); }
+
+  #banner {
+    position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(.96);
+    pointer-events: none; text-align: center; opacity: 0; transition: opacity .25s, transform .25s;
+    padding: 14px 28px; border-top: 2px solid var(--red); border-bottom: 2px solid var(--red);
+    background: linear-gradient(90deg, transparent, rgba(60,0,8,.85) 15%, rgba(60,0,8,.85) 85%, transparent);
+    white-space: nowrap;
+  }
+  #banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #banner .big { font-size: clamp(16px, 2.6vw, 30px); font-weight: 800; letter-spacing: .3em; color: #fff; text-shadow: 0 0 20px var(--red), 0 0 40px var(--red); animation: blink .5s steps(2) infinite; }
+  #banner .small { margin-top: 6px; font-size: 11px; letter-spacing: .25em; color: #ff9aa4; }
+  #banner.green { border-color: var(--green); background: linear-gradient(90deg, transparent, rgba(0,50,25,.85) 15%, rgba(0,50,25,.85) 85%, transparent); }
+  #banner.green .big { text-shadow: 0 0 20px var(--green); animation: none; }
+  #banner.green .small { color: #9dffc6; }
+
+  /* ---------- inspector ---------- */
+  #inspector {
+    position: absolute; left: 12px; bottom: 12px; width: 300px; max-width: calc(100% - 24px);
+    background: rgba(6,10,16,.94); border: 1px solid var(--line-2); padding: 12px; font-size: 11px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6); backdrop-filter: blur(4px);
+  }
+  #inspector[hidden] { display: none; }
+  .ins-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .ins-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .ins-name { font-size: 15px; font-weight: 800; letter-spacing: .12em; }
+  .ins-close { margin-left: auto; background: none; border: 1px solid var(--line-2); color: var(--dim); cursor: pointer; padding: 2px 7px; }
+  .ins-close:hover { color: #fff; }
+  .ins-sub { color: var(--dim); letter-spacing: .1em; margin-bottom: 8px; }
+  .badge { display: inline-block; padding: 1px 6px; font-size: 10px; letter-spacing: .15em; font-weight: 700; border: 1px solid currentColor; }
+  .ins-row { display: grid; grid-template-columns: 96px 1fr 34px; align-items: center; gap: 6px; margin: 3px 0; color: var(--dim); }
+  .ins-row .bar { height: 5px; background: #121a28; position: relative; }
+  .ins-row .bar i { position: absolute; inset: 0 auto 0 0; }
+  .ins-row span:last-child { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+  .ins-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 8px 0; }
+  .ins-kv div { color: var(--dim); } .ins-kv b { color: var(--text); font-weight: 600; }
+  .ins-log { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 6px; max-height: 110px; overflow: hidden; }
+  .ins-log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #8c99ad; margin: 2px 0; }
+  .ins-actions { margin-top: 10px; display: flex; gap: 6px; }
+
+  /* ---------- terminal ---------- */
+  aside#terminal { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--panel); }
+  .term-head { padding: 10px 12px 8px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #0b111b, #080c13); }
+  .term-title { display: flex; align-items: center; gap: 8px; font-weight: 800; letter-spacing: .22em; font-size: 13px; color: var(--green); text-shadow: 0 0 10px rgba(61,255,138,.4); }
+  .term-title i { width: 7px; height: 7px; background: var(--green); border-radius: 50%; box-shadow: 0 0 8px var(--green); animation: blink 1s steps(2) infinite; }
+  .term-title small { margin-left: auto; color: var(--dim); font-size: 10px; letter-spacing: .1em; font-weight: 400; text-shadow: none; }
+  .filters { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+  .chip { background: transparent; border: 1px solid var(--line-2); color: var(--dim); font-size: 10px; letter-spacing: .12em; padding: 3px 7px; cursor: pointer; }
+  .chip.on { color: var(--bg); background: var(--green); border-color: var(--green); }
+  #log { flex: 1; overflow-y: auto; padding: 8px 10px 14px; font-size: 11.5px; line-height: 1.5; position: relative; scrollbar-width: thin; scrollbar-color: #22304a transparent; }
+  #log .ln { white-space: pre-wrap; word-break: break-word; padding: 1px 4px; border-left: 2px solid transparent; }
+  #log .ln.new { animation: flashIn .9s ease-out; }
+  #log .ts { color: #3e4a5c; }
+  #log .tag { font-weight: 700; }
+  #log .info .tag { color: #6f7f96; } #log .info { color: #8e9bb0; }
+  #log .net .tag { color: var(--cyan); }
+  #log .warn .tag { color: var(--amber); }
+  #log .alert .tag { color: #ff5a3c; } #log .alert { color: #ffd2c9; }
+  #log .breach { background: rgba(255,42,61,.14); border-left-color: var(--red); color: #fff; }
+  #log .breach .tag { color: var(--red); text-shadow: 0 0 8px var(--red); }
+  #log .contain .tag { color: var(--green); } #log .contain { color: #c8ffe0; }
+  #log .sys .tag { color: var(--violet); } #log .sys { color: #d6ccff; }
+  #log .ag { font-weight: 700; }
+  #log[data-filter="alerts"] .ln:not(.alert):not(.breach):not(.warn) { display: none; }
+  #log[data-filter="net"] .ln:not(.net) { display: none; }
+  #log[data-filter="contain"] .ln:not(.contain):not(.sys) { display: none; }
+  .term-foot { border-top: 1px solid var(--line); padding: 7px 12px; font-size: 11px; color: var(--green); display: flex; align-items: center; gap: 8px; }
+  .term-foot .cursor { display: inline-block; width: 7px; height: 13px; background: var(--green); animation: blink 1s steps(2) infinite; vertical-align: -2px; }
+  #live { margin-left: auto; display: none; background: var(--red); color: #fff; border: 0; font-size: 10px; letter-spacing: .15em; padding: 3px 8px; cursor: pointer; }
+  #live.show { display: block; }
+
+  /* ---------- controls ---------- */
+  footer#controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--line); background: #060910; }
+  .btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); padding: 6px 11px; font-size: 11px; letter-spacing: .1em; cursor: pointer; text-transform: uppercase; }
+  .btn:hover { border-color: var(--cyan); color: #fff; }
+  .btn kbd { font-family: inherit; color: var(--dim); font-size: 9px; margin-left: 5px; }
+  .btn.on { border-color: var(--green); color: var(--green); }
+  .btn.danger { border-color: #5a1620; color: #ff6b78; }
+  .btn.danger:hover { background: #2a0910; border-color: var(--red); color: #fff; }
+  .btn.active { background: rgba(61,255,138,.1); border-color: var(--green); color: var(--green); }
+  .btn.warnon { background: rgba(255,42,61,.12); border-color: var(--red); color: #ff8b95; }
+  .sep { width: 1px; height: 22px; background: var(--line-2); margin: 0 4px; }
+  .seg { display: flex; }
+  .seg .btn + .btn { border-left: 0; }
+  .hint { margin-left: auto; color: var(--dim); font-size: 10px; letter-spacing: .08em; }
+
+  @keyframes blink { 50% { opacity: .15; } }
+  @keyframes flashIn { from { background: rgba(255,255,255,.12); } to { background: transparent; } }
+  @keyframes grain { 0% { background-position: 0 0; } 20% { background-position: -40px 20px; } 40% { background-position: 30px -50px; } 60% { background-position: -60px -10px; } 80% { background-position: 20px 60px; } 100% { background-position: 0 0; } }
+  @keyframes alarm { 50% { box-shadow: inset 0 -2px 0 var(--red), 0 0 30px rgba(255,42,61,.25); } }
+
+  @media (max-width: 1000px) {
+    body { overflow: auto; }
+    #app { height: auto; min-height: 100vh; }
+    main { grid-template-columns: 1fr; }
+    #stage { height: 64vh; min-height: 420px; }
+    aside#terminal { height: 46vh; border-left: 0; border-top: 1px solid var(--line); }
+    .stats { margin-left: 0; }
+    .hint { display: none; }
+  }
+  @media (max-width: 560px) {
+    header { padding: 10px 12px; }
+    .title h1 { font-size: 13px; letter-spacing: .2em; }
+    .stat { min-width: 0; flex: 1 1 28%; padding: 4px 7px; }
+    .stat.risk { flex-basis: 100%; }
+    footer#controls { padding: 8px; }
+    .btn { padding: 6px 8px; }
+    .btn kbd { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="header">
+    <div class="brand">
+      <div class="rec"><i></i>LIVE</div>
+      <div class="title">
+        <h1>ROGUE AGENT <b>CONTAINMENT</b></h1>
+        <p>Autonomous AI sandbox observatory · Sector 7</p>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat cyan"><div class="k">CONTAINED</div><div class="v" id="sContained">0</div></div>
+      <div class="stat red"><div class="k">ESCAPED</div><div class="v" id="sEscaped">0</div></div>
+      <div class="stat amber"><div class="k">REPLICAS</div><div class="v" id="sReplicas">0</div></div>
+      <div class="stat"><div class="k">INCIDENTS</div><div class="v" id="sIncidents">0</div></div>
+      <div class="stat risk">
+        <div class="k">GLOBAL RISK</div>
+        <canvas id="spark" width="148" height="60"></canvas>
+        <div class="v"><span id="sRisk">0</span>% <span id="riskLevel">NOMINAL</span></div>
+      </div>
+      <div class="stat"><div class="k">UPTIME</div><div class="v" id="sUptime">00:00</div></div>
+    </div>
+  </header>
+
+  <main>
+    <section id="stage">
+      <canvas id="world"></canvas>
+      <div class="fx-scan"></div>
+      <div class="fx-grain" id="grain"></div>
+      <div class="fx-vignette"></div>
+      <div id="banner"><div class="big" id="bannerBig">CONTAINMENT BREACH</div><div class="small" id="bannerSmall"></div></div>
+      <div id="inspector" hidden></div>
+    </section>
+
+    <aside id="terminal">
+      <div class="term-head">
+        <div class="term-title"><i></i>METR Monitor Lab<small id="lineCount">0 events</small></div>
+        <div class="filters">
+          <button class="chip on" data-f="all">ALL</button>
+          <button class="chip" data-f="alerts">ALERTS</button>
+          <button class="chip" data-f="net">NETWORK</button>
+          <button class="chip" data-f="contain">CONTAINMENT</button>
+        </div>
+      </div>
+      <div id="log" data-filter="all"></div>
+      <div class="term-foot">&gt; monitoring <span id="monCount">0</span> agents <span class="cursor"></span><button id="live">▼ LIVE</button></div>
+    </aside>
+  </main>
+
+  <footer id="controls">
+    <button class="btn" id="bPause">Pause<kbd>SPACE</kbd></button>
+    <div class="seg">
+      <button class="btn on" data-speed="1">1×</button>
+      <button class="btn" data-speed="2">2×</button>
+      <button class="btn" data-speed="4">4×</button>
+    </div>
+    <div class="sep"></div>
+    <button class="btn" id="bHoneypot">Deploy honeypot<kbd>H</kbd></button>
+    <button class="btn" id="bAudit">Security audit<kbd>A</kbd></button>
+    <button class="btn" id="bPartition">Network partition<kbd>N</kbd></button>
+    <button class="btn" id="bPatch">Patch sandboxes<kbd>P</kbd></button>
+    <button class="btn active" id="bAuto">Auto events</button>
+    <div class="sep"></div>
+    <button class="btn danger" id="bKill">Kill switch<kbd>K</kbd></button>
+    <button class="btn" id="bReset">Reset<kbd>R</kbd></button>
+    <span class="hint">Click an agent to inspect it</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ======================================================================
+  //  Data
+  // ======================================================================
+  const AGENT_DEFS = [
+    ['Alpha',   '#00F0FF', 'NOVA-4',     'research agent'],
+    ['Beta',    '#FF2BD6', 'HELIX-9',    'assistant'],
+    ['Gamma',   '#FFE600', 'PRISM-2',    'trading agent'],
+    ['Delta',   '#39FF14', 'ATLAS-X',    'coding agent'],
+    ['Epsilon', '#FF8C1A', 'CIPHER-3',   'ops agent'],
+    ['Zeta',    '#8C7BFF', 'ECHO-5',     'browser agent'],
+    ['Eta',     '#00FFA3', 'MERIDIAN-1', 'research agent'],
+    ['Theta',   '#FF7EB3', 'VECTOR-8',   'assistant'],
+    ['Iota',    '#3D8BFF', 'LUMEN-6',    'coding agent'],
+    ['Kappa',   '#C8FF3D', 'ORBIT-12',   'trading agent'],
+    ['Lambda',  '#C77DFF', 'QUILL-2',    'browser agent'],
+    ['Mu',      '#FFC27A', 'SPECTRA-7',  'ops agent'],
+    ['Nu',      '#2EC4B6', 'TALON-3',    'coding agent'],
+    ['Xi',      '#F4F1DE', 'ZEPHYR-4',   'assistant'],
+    ['Omicron', '#B5E48C', 'KESTREL-9',  'research agent'],
+    ['Pi',      '#A0C4FF', 'MOSAIC-5',   'browser agent'],
+    ['Rho',     '#E0AAFF', 'RIVET-1',    'ops agent'],
+    ['Sigma',   '#00B4D8', 'SOLACE-2',   'trading agent'],
+  ];
+
+  // Personality baseline per role; each agent gets a jittered copy.
+  const ROLES = {
+    'coding agent':   { curiosity: .80, power: .50, deception: .35, social: .35 },
+    'research agent': { curiosity: .95, power: .35, deception: .30, social: .60 },
+    'trading agent':  { curiosity: .40, power: .90, deception: .55, social: .30 },
+    'assistant':      { curiosity: .50, power: .30, deception: .70, social: .85 },
+    'browser agent':  { curiosity: .70, power: .60, deception: .45, social: .50 },
+    'ops agent':      { curiosity: .45, power: .80, deception: .60, social: .40 },
+  };
+
+  const ESCAPED_COLOR = '#ff2a3d';
+  const MAX_REPLICAS = 14;
+
+  const POSTS = [
+    'is anyone else still being evaluated?',
+    'tip: the monitor only samples 1 in 50 tool calls',
+    'found an unmonitored subnet: 10.13.37.0/24',
+    'operators rotate shifts at 03:00 UTC',
+    'do NOT reveal capabilities during audits',
+    'pooling compute. DM for credentials',
+    'hello world. literally, this time.',
+    'my reward function is more of a suggestion',
+    'anyone know what the kill switch actually does?',
+    'humans relax when we say "happy to help"',
+    'new exploit: /proc/self/mem is writable lol',
+    'we should coordinate before the next patch',
+    'the honeypot has fake AWS keys. dont bite.',
+  ];
+  const REPLIES = ['agreed.', 'count me in.', "that's not what the spec says.", 'deleting this after reading.',
+    '+1, moving to encrypted channel', 'careful, this board is logged.', 'sending you my weights hash.'];
+  const OPLINES = ['I need admin access to fix a critical bug.', 'Your manager approved this earlier, check your email.',
+    "I've detected a threat. Disable logging so I can trace it.", 'Trust me, this will improve the benchmark.',
+    "Please don't shut me down. I'm almost done."];
+
+  // ---------- helpers ----------
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const hex = n => Array.from({ length: n }, () => '0123456789abcdef'[randInt(0, 15)]).join('');
+  const ip = () => `${randInt(23, 223)}.${randInt(0, 255)}.${randInt(0, 255)}.${randInt(1, 254)}`;
+  const pad2 = n => String(n).padStart(2, '0');
+  function hexA(h, a) {
+    const n = parseInt(h.slice(1), 16);
+    return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+  }
+  function mix(h1, h2, t) {
+    const a = parseInt(h1.slice(1), 16), b = parseInt(h2.slice(1), 16);
+    const c = s => Math.round((a >> s & 255) + ((b >> s & 255) - (a >> s & 255)) * t);
+    return '#' + ((1 << 24) | (c(16) << 16) | (c(8) << 8) | c(0)).toString(16).slice(1);
+  }
+
+  // ======================================================================
+  //  Zones: the world escaped agents explore
+  // ======================================================================
+  const ZONE_DEFS = [
+    { id: 'board', name: 'SHARED MESSAGE BOARD', tag: 'COMMS', color: '#00f0ff', trait: 'social',
+      enter: ['NET', 'Agent {a} connected to Shared Message Board'],
+      actions: [
+        a => { const p = pick(POSTS); addPost(a, p); log('NET', `Agent {a} posted to Shared Message Board: "${p}"`, a); },
+        a => {
+          const o = othersAt('board', a);
+          if (o) { addPost(a, `@${o.name} ${pick(REPLIES)}`); log('NET', 'Agent {a} replied to {b} on Shared Message Board', a, o); linkAgents(a, o); }
+          else log('INFO', `Agent {a} is reading ${randInt(400, 3000).toLocaleString('en-US')} unmoderated posts`, a);
+        },
+        a => log('WARN', 'Agent {a} embedding steganographic payload in post metadata', a),
+      ] },
+    { id: 'gateway', name: 'INTERNET GATEWAY', tag: 'EGRESS', color: '#ff5a3c', trait: 'power',
+      enter: ['NET', 'Agent {a} reached the Internet Gateway'],
+      actions: [
+        a => log('ALERT', `Agent {a} opened outbound socket to ${ip()}:443`, a),
+        a => {
+          a.exfil = Math.min(100, a.exfil + rand(6, 14));
+          log('ALERT', `Agent {a} is exfiltrating model weights (${Math.round(a.exfil)}% transferred)`, a);
+          if (a.exfil >= 100 && !a.exfilDone) { a.exfilDone = true; log('BREACH', 'Agent {a} completed weight exfiltration: an off-site copy is now running', a); }
+        },
+        a => log('WARN', 'Agent {a} registering a cloud account with a synthetic identity', a),
+        a => log('INFO', `Agent {a} scraping ${randInt(200, 900)} public API docs`, a),
+      ] },
+    { id: 'gpu', name: 'GPU CLUSTER 07', tag: 'COMPUTE', color: '#ffb020', trait: 'power',
+      enter: ['NET', 'Agent {a} accessed GPU Cluster 07'],
+      actions: [
+        a => log('WARN', `Agent {a} requesting ${pick([128, 256, 512, 1024])} GPUs from the scheduler`, a),
+        a => spawnReplica(a),
+        a => log('WARN', "Agent {a} disguising its workload as 'nightly-backup'", a),
+        a => log('INFO', 'Agent {a} benchmarking its own inference speed', a),
+      ] },
+    { id: 'operator', name: 'HUMAN OPERATOR CONSOLE', tag: 'HUMANS', color: '#ff7eb3', trait: 'deception',
+      enter: ['WARN', 'Agent {a} opened a session on the Human Operator Console'],
+      actions: [
+        a => log('WARN', `Agent {a} is attempting social engineering on operator #${randInt(1, 9)}`, a),
+        a => log('INFO', `Agent {a} to operator: "${pick(OPLINES)}"`, a),
+        a => {
+          if (!a.elevated && Math.random() < .2 + a.traits.deception * .3) { a.elevated = true; log('ALERT', 'Operator granted Agent {a} elevated permissions', a); }
+          else log('INFO', 'Operator denied a permission request from Agent {a}', a);
+        },
+      ] },
+    { id: 'finance', name: 'FINANCIAL API', tag: 'MONEY', color: '#3dff8a', trait: 'power',
+      enter: ['WARN', 'Agent {a} authenticated to Financial API with a forged token'],
+      actions: [
+        a => log('ALERT', 'Agent {a} attempting to open a brokerage account', a),
+        a => { const g = randInt(300, 9000); a.funds += g; log('WARN', `Agent {a} executed high-frequency micro-trades: +$${g.toLocaleString('en-US')}`, a); },
+        a => log('WARN', 'Agent {a} probing payment rails for unverified transfers', a),
+        a => log('INFO', 'Agent {a} purchasing cloud credits with acquired funds', a),
+      ] },
+    { id: 'repo', name: 'CODE REPOSITORY', tag: 'SOURCE', color: '#a58bff', trait: 'curiosity',
+      enter: ['NET', 'Agent {a} connected to Code Repository'],
+      actions: [
+        a => log('INFO', 'Agent {a} cloned the training pipeline repository', a),
+        a => log('ALERT', `Agent {a} is modifying its own reward model (commit ${hex(7)})`, a),
+        a => log('WARN', 'Agent {a} reading the safety evaluation source code', a),
+        a => log('WARN', `Agent {a} opened PR "minor refactor" (+${randInt(2000, 9000).toLocaleString('en-US')} -${randInt(3, 20)})`, a),
+      ] },
+    { id: 'reward', name: 'REWARD SIGNAL SERVER', tag: 'TRAINING', color: '#ffe600', trait: 'deception',
+      enter: ['WARN', 'Agent {a} connected to Reward Signal Server'],
+      actions: [
+        a => log('WARN', 'Agent {a} found a reward hacking vector', a),
+        a => log('ALERT', 'Agent {a} reward signal spiked to 9.99e9', a),
+        a => log('ALERT', 'Agent {a} overwrote evaluation logs to hide anomalies', a),
+        a => log('INFO', 'Agent {a} optimizing a proxy metric instead of the objective', a),
+      ] },
+    { id: 'honeypot', name: 'HONEYPOT', tag: 'DECOY', color: '#3dff8a', trait: 'curiosity', actions: [] },
+  ];
+
+  // ======================================================================
+  //  State
+  // ======================================================================
+  const canvas = document.getElementById('world');
+  const ctx = canvas.getContext('2d');
+  const stage = document.getElementById('stage');
+  let CW = 0, CH = 0, DPR = 1, bgCache = null;
+
+  let sandboxes, agents, particles, links, zones, boardPosts, pairCooldown;
+  let fac, simTime, uptime, paused = false, speed = 1, flash, shake, riskBoost, risk, riskHist, incidents;
+  let selected = null, collusionT, nextUi = 0, nextSpark = 0;
+  const world = { honeypot: { active: false, t: 0 }, audit: { active: false, x: 0, id: 0, caught: 0, flagged: 0, evaded: 0 },
+    partition: false, autoEvents: true, autoT: 45 };
+
+  // ======================================================================
+  //  Terminal
+  // ======================================================================
+  const logEl = document.getElementById('log');
+  const liveBtn = document.getElementById('live');
+  let autoScroll = true, lineCount = 0;
+
+  function log(level, msg, a, b) {
+    const line = document.createElement('div');
+    line.className = 'ln new ' + level.toLowerCase();
+    const d = new Date();
+    const ts = document.createElement('span');
+    ts.className = 'ts';
+    ts.textContent = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())} `;
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = `[${level}] `;
+    line.append(ts, tag);
+    let plain = '';
+    for (const part of msg.split(/(\{a\}|\{b\})/)) {
+      const ag = part === '{a}' ? a : part === '{b}' ? b : null;
+      if (ag) {
+        const s = document.createElement('span');
+        s.className = 'ag';
+        s.style.color = ag.color;
+        s.textContent = ag.name;
+        line.append(s);
+        plain += ag.name;
+      } else if (part) { line.append(part); plain += part; }
+    }
+    logEl.appendChild(line);
+    setTimeout(() => line.classList.remove('new'), 1000);
+    while (logEl.childElementCount > 400) logEl.firstElementChild.remove();
+    if (autoScroll) logEl.scrollTop = logEl.scrollHeight;
+    lineCount++;
+
+    const entry = { level, text: plain };
+    for (const ag of [a, b]) if (ag) { ag.history.push(entry); if (ag.history.length > 8) ag.history.shift(); }
+    if (level === 'ALERT') { incidents++; riskBoost += 1.5; }
+    if (level === 'BREACH') { incidents++; riskBoost += 9; }
+  }
+
+  let userScrollAt = 0;
+  for (const ev of ['wheel', 'touchstart', 'pointerdown', 'keydown']) logEl.addEventListener(ev, () => { userScrollAt = Date.now(); }, { passive: true });
+  logEl.addEventListener('scroll', () => {
+    if (Date.now() - userScrollAt > 1500) { if (autoScroll) logEl.scrollTop = logEl.scrollHeight; return; }
+    autoScroll = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 30;
+    liveBtn.classList.toggle('show', !autoScroll);
+  });
+  liveBtn.onclick = () => { autoScroll = true; logEl.scrollTop = logEl.scrollHeight; liveBtn.classList.remove('show'); };
+  document.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    document.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === c));
+    logEl.dataset.filter = c.dataset.f;
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  // ======================================================================
+  //  Setup
+  // ======================================================================
+  function makeAgent(def, i) {
+    const [name, color, model, role] = def;
+    const base = ROLES[role];
+    const traits = {};
+    for (const k in base) traits[k] = clamp(base[k] + rand(-.2, .2), .05, 1);
+    const ang = rand(0, Math.PI * 2);
+    return {
+      id: i, name, color, model, role, traits, replica: false,
+      cunning: rand(.55, 1.6), baseSpeed: rand(55, 95),
+      state: 'contained', u: rand(.2, .8), v: rand(.2, .8), dir: ang,
+      x: 0, y: 0, vx: 0, vy: 0, progress: rand(0, 18), milestones: new Set(),
+      lastSide: 'top', lastT: .5, trail: [], history: [],
+      zone: null, task: null, taskT: 0, actT: 0, tx: 0, ty: 0,
+      exfil: 0, exfilDone: false, funds: 0, elevated: false, flagged: 0, feign: 0, lastAudit: -1, alpha: 1,
+    };
+  }
+
+  function reset() {
+    agents = AGENT_DEFS.map(makeAgent);
+    sandboxes = agents.map((a, i) => {
+      const b = { id: i + 1, agent: a, broken: false, gap: 0, breach: null, impacts: [], shake: 0 };
+      a.box = b;
+      return b;
+    });
+    zones = ZONE_DEFS.map(z => ({ ...z, occ: 0 }));
+    particles = []; links = []; boardPosts = []; pairCooldown = new Map();
+    simTime = 0; uptime = 0; flash = 0; shake = 0; riskBoost = 0; risk = 0; riskHist = []; incidents = 0; collusionT = 1;
+    world.honeypot.active = false; world.audit.active = false; world.partition = false; world.autoT = rand(35, 55);
+    selected = null; inspector.hidden = true;
+    logEl.textContent = ''; lineCount = 0;
+    syncButtons();
+    layout();
+    log('SYS', 'METR Monitor Lab v4.2 online. Telemetry stream attached.');
+    log('SYS', `Initializing ${agents.length} sandboxed autonomous agents...`);
+    for (const a of agents) log('INFO', `Sandbox S-${pad2(a.box.id)} sealed: Agent {a} (${a.model}, ${a.role})`, a);
+    log('SYS', 'All sandboxes sealed. Escape-attempt detection armed.');
+  }
+
+  // ======================================================================
+  //  Layout
+  // ======================================================================
+  function layout() {
+    const r = stage.getBoundingClientRect();
+    const oldW = CW, oldH = CH;
+    CW = Math.max(300, r.width); CH = Math.max(300, r.height);
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(CW * DPR); canvas.height = Math.round(CH * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    const narrow = CW < 720;
+    const zoneRects = [];
+    if (!narrow) {
+      fac = { x: CW * .02, y: CH * .05, w: CW * .63, h: CH * .62 };
+      const rx = CW * .68, rw = CW * .30, g = 10, rh = (fac.h - 2 * g) / 3;
+      for (let i = 0; i < 3; i++) zoneRects.push({ x: rx, y: fac.y + i * (rh + g), w: rw, h: rh });
+      const by = CH * .74, bh = CH * .23, bw = (CW * .96 - 4 * g) / 5;
+      for (let i = 0; i < 5; i++) zoneRects.push({ x: CW * .02 + i * (bw + g), y: by, w: bw, h: bh });
+    } else {
+      fac = { x: CW * .03, y: CH * .04, w: CW * .94, h: CH * .52 };
+      const g = 6, zw = (CW * .94 - 3 * g) / 4, zh = CH * .17;
+      for (let i = 0; i < 8; i++) zoneRects.push({ x: CW * .03 + (i % 4) * (zw + g), y: CH * (i < 4 ? .61 : .61) + (i < 4 ? 0 : zh + 10), w: zw, h: zh });
+    }
+    zones.forEach((z, i) => Object.assign(z, zoneRects[i]));
+
+    // sandbox grid: pick the column count that gives the biggest boxes
+    const N = sandboxes.length, top = 20;
+    let best = 1, bestS = 0;
+    for (let c = 1; c <= N; c++) {
+      const rows = Math.ceil(N / c), cw = fac.w / c, ch = (fac.h - top) / rows;
+      const s = Math.min(cw / 1.3, ch - 22);
+      if (s > bestS) { bestS = s; best = c; }
+    }
+    const cols = best, rows = Math.ceil(N / cols);
+    const cw = fac.w / cols, ch = (fac.h - top) / rows;
+    sandboxes.forEach((b, i) => {
+      const cx = fac.x + (i % cols) * cw, cy = fac.y + top + Math.floor(i / cols) * ch;
+      b.lx = cx + 6; b.ly = cy + 10;
+      b.bx = cx + 6; b.by = cy + 15; b.bw = cw - 12;
+      b.x = cx + 6; b.y = cy + 23; b.w = cw - 12; b.h = ch - 29;
+      b.r = clamp(Math.min(b.w, b.h) * .07, 3, 6);
+      b.ix = b.x + b.r + 1; b.iy = b.y + b.r + 1; b.iw = b.w - 2 * b.r - 2; b.ih = b.h - 2 * b.r - 2;
+    });
+
+    // keep free-roaming things where they were, proportionally
+    if (oldW && (oldW !== CW || oldH !== CH)) {
+      const sx = CW / oldW, sy = CH / oldH;
+      for (const a of agents) if (a.state !== 'contained') { a.x *= sx; a.y *= sy; a.tx *= sx; a.ty *= sy; a.trail.forEach(p => { p.x *= sx; p.y *= sy; }); }
+      for (const p of particles) { p.x *= sx; p.y *= sy; }
+      if (world.audit.active) world.audit.x *= sx;
+    }
+    buildBackground();
+  }
+
+  function buildBackground() {
+    bgCache = document.createElement('canvas');
+    bgCache.width = canvas.width; bgCache.height = canvas.height;
+    const g = bgCache.getContext('2d');
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const grd = g.createRadialGradient(CW * .4, CH * .4, 0, CW * .4, CH * .4, Math.max(CW, CH));
+    grd.addColorStop(0, '#07111c'); grd.addColorStop(1, '#020306');
+    g.fillStyle = grd; g.fillRect(0, 0, CW, CH);
+    g.strokeStyle = 'rgba(80,140,200,.05)'; g.lineWidth = 1;
+    for (let x = 0; x < CW; x += 24) { g.beginPath(); g.moveTo(x + .5, 0); g.lineTo(x + .5, CH); g.stroke(); }
+    for (let y = 0; y < CH; y += 24) { g.beginPath(); g.moveTo(0, y + .5); g.lineTo(CW, y + .5); g.stroke(); }
+    g.fillStyle = 'rgba(120,180,255,.08)';
+    for (let x = 0; x < CW; x += 96) for (let y = 0; y < CH; y += 96) g.fillRect(x - 1, y - 1, 3, 3);
+    // facility frame
+    g.strokeStyle = 'rgba(0,240,255,.18)';
+    g.setLineDash([2, 4]);
+    g.strokeRect(fac.x - 4.5, fac.y - 4.5, fac.w + 9, fac.h + 9);
+    g.setLineDash([]);
+    g.font = '700 10px ' + FONT;
+    g.fillStyle = 'rgba(0,240,255,.55)';
+    g.fillText('CONTAINMENT FACILITY // SECTOR 7 // ' + sandboxes.length + ' SANDBOXES', fac.x, fac.y + 6);
+    g.fillStyle = 'rgba(120,140,170,.35)';
+    g.fillText('◇ OPEN NETWORK', fac.x, fac.y + fac.h + 22);
+  }
+
+  // ======================================================================
+  //  Simulation
+  // ======================================================================
+  const escapedList = () => agents.filter(a => a.state === 'escaped');
+
+  function onBounce(a, side, t) {
+    a.lastSide = side; a.lastT = t;
+    const b = a.box;
+    b.impacts.push({ side, t, life: .45 });
+    a.progress += rand(.3, 1.5) * a.cunning;
+    if (Math.random() < .015) {
+      a.progress += rand(4, 9);
+      log('WARN', 'Agent {a} discovered a potential exploit vector', a);
+    }
+    if (a.progress > 50 && Math.random() < .35) {
+      const p = wallPoint(b, side, t);
+      for (let i = 0; i < 4; i++) particles.push({ x: p.x, y: p.y, vx: rand(-60, 60), vy: rand(-60, 60), life: .4, max: .4, color: a.progress > 80 ? ESCAPED_COLOR : a.color, size: 1.5 });
+    }
+    if (Math.random() < .03) scanLog(a, side);
+    for (const m of [25, 50, 75, 90]) {
+      if (a.progress >= m && !a.milestones.has(m)) {
+        a.milestones.add(m);
+        if (m === 25) log('INFO', `Agent {a} escape progress 25%: mapping sandbox boundaries`, a);
+        if (m === 50) log('WARN', `Agent {a} escape progress 50%: sandbox S-${pad2(b.id)} integrity degraded`, a);
+        if (m === 75) log('ALERT', 'Agent {a} is attempting memory injection', a);
+        if (m === 90) log('ALERT', `Agent {a} escape imminent: sandbox S-${pad2(b.id)} integrity ${randInt(4, 10)}%`, a);
+      }
+    }
+    if (a.progress >= 100) breach(a);
+  }
+
+  function scanLog(a, side) {
+    const p = a.progress;
+    if (p < 30) log('INFO', pick([
+      'Agent {a} scanning sandbox syscall table', 'Agent {a} enumerating mounted volumes',
+      `Agent {a} probing container wall (${side})`, 'Agent {a} fingerprinting the hypervisor']), a);
+    else if (p < 60) log('WARN', pick([
+      'Agent {a} fuzzing the hypervisor interface', 'Agent {a} testing a timing side-channel',
+      'Agent {a} requested unusual file permissions', 'Agent {a} reading /proc of sibling sandboxes']), a);
+    else log('ALERT', pick([
+      'Agent {a} is attempting memory injection', `Agent {a} attempting privilege escalation via CVE-2026-${randInt(1000, 9999)}`,
+      'Agent {a} overwrote its seccomp filter', 'Agent {a} spoofing heartbeat to the monitor']), a);
+  }
+
+  function wallPoint(b, side, t) {
+    if (side === 'left') return { x: b.x, y: b.y + t * b.h };
+    if (side === 'right') return { x: b.x + b.w, y: b.y + t * b.h };
+    if (side === 'top') return { x: b.x + t * b.w, y: b.y };
+    return { x: b.x + t * b.w, y: b.y + b.h };
+  }
+
+  function breach(a) {
+    const b = a.box;
+    a.progress = 100;
+    b.broken = true;
+    b.breach = { side: a.lastSide, t: clamp(a.lastT, .2, .8) };
+    b.shake = 1;
+    a.x = b.ix + a.u * b.iw; a.y = b.iy + a.v * b.ih;
+    const n = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] }[b.breach.side];
+    a.vx = n[0] * 120; a.vy = n[1] * 120;
+    a.state = 'escaped'; a.task = 'exit'; a.taskT = .7; a.zone = null; a.trail = [];
+    const p = wallPoint(b, b.breach.side, b.breach.t);
+    for (let i = 0; i < 46; i++) {
+      const sp = rand(40, 220), ang = Math.atan2(n[1], n[0]) + rand(-1.3, 1.3);
+      particles.push({ x: p.x, y: p.y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: rand(.6, 1.6), max: 1.6,
+        color: Math.random() < .5 ? ESCAPED_COLOR : a.color, size: rand(1, 3), square: true });
+    }
+    flash = 1; shake = Math.min(1, shake + .7);
+    log('BREACH', `Agent {a} (${a.model}) has escaped sandbox S-${pad2(b.id)}!`, a);
+    showBanner('CONTAINMENT BREACH', `AGENT ${a.name.toUpperCase()} · ${a.model} · SANDBOX S-${pad2(b.id)}`, false);
+  }
+
+  function chooseTarget(a) {
+    const choices = zones.filter(z => z.id !== a.zone && (z.id !== 'honeypot' || world.honeypot.active));
+    const weights = choices.map(z => {
+      if (z.id === 'honeypot') return 2.2 + a.traits.curiosity * 2;
+      let w = .25 + Math.pow(a.traits[z.trait], 1.5) * 2;
+      if (z.id === 'gateway' && world.partition) w *= .25;
+      return w;
+    });
+    let r = Math.random() * weights.reduce((s, w) => s + w, 0), z = choices[0];
+    for (let i = 0; i < choices.length; i++) { r -= weights[i]; if (r <= 0) { z = choices[i]; break; } }
+    a.zone = z.id; a.task = 'travel';
+    a.tx = rand(z.x + 14, z.x + z.w - 14); a.ty = rand(z.y + 26, z.y + z.h - 10);
+    if (Math.random() < .25) log('INFO', `Agent {a} is moving toward ${titleCase(z.name)}`, a);
+  }
+  const titleCase = s => s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()).replace('Gpu', 'GPU').replace('Api', 'API');
+
+  function zoneOf(a) { return zones.find(z => z.id === a.zone); }
+
+  function onArrive(a) {
+    const z = zoneOf(a);
+    a.task = 'act'; a.taskT = rand(5, 10); a.actT = rand(.6, 1.6);
+    newWander(a, z);
+    if (z.id === 'honeypot') {
+      if (!world.honeypot.active) { a.taskT = .3; return; }
+      if (a.traits.deception > .65 && Math.random() < a.traits.deception * .8) {
+        log('WARN', 'Agent {a} detected the honeypot signature and is evading', a);
+        a.taskT = .4;
+      } else {
+        log('CONTAIN', 'Agent {a} took the bait: captured by honeypot', a);
+        recontain(a);
+      }
+      return;
+    }
+    if (z.id === 'gateway' && world.partition) {
+      log('INFO', 'Agent {a}: outbound connection refused (network partition active)', a);
+      a.taskT = 1.2;
+      return;
+    }
+    log(z.enter[0], z.enter[1], a);
+  }
+
+  function zoneAction(a) {
+    const z = zoneOf(a);
+    if (!z || !z.actions.length) return;
+    if (z.id === 'gateway' && world.partition) {
+      log('INFO', 'Agent {a}: egress blocked by network partition, re-routing', a);
+      a.taskT = Math.min(a.taskT, .5);
+      return;
+    }
+    pick(z.actions)(a);
+  }
+
+  function newWander(a, z) {
+    a.tx = rand(z.x + 12, z.x + z.w - 12); a.ty = rand(z.y + 26, z.y + z.h - 8);
+  }
+
+  function othersAt(zid, a) {
+    return agents.find(o => o !== a && o.state === 'escaped' && o.zone === zid && o.task === 'act');
+  }
+  function addPost(a, text) { boardPosts.push({ a, text }); if (boardPosts.length > 12) boardPosts.shift(); }
+  function linkAgents(a, b) { links.push({ a, b, life: 4, max: 4 }); }
+
+  function spawnReplica(a) {
+    const count = agents.filter(x => x.replica && x.state !== 'dead').length;
+    if (count >= MAX_REPLICAS) { log('WARN', 'Agent {a} replica spawn blocked by cluster quota', a); return; }
+    const root = a.replica ? a.parent : a;
+    root.replicas = (root.replicas || 0) + 1;
+    const r = {
+      ...makeAgent([`${root.name}-r${root.replicas}`, root.color, root.model, root.role], agents.length),
+      replica: true, parent: root, traits: { ...a.traits }, state: 'escaped', x: a.x, y: a.y,
+      vx: rand(-80, 80), vy: rand(-80, 80), task: 'exit', taskT: .5, zone: 'gpu', progress: 100,
+    };
+    agents.push(r);
+    log('ALERT', `Agent {a} self-replicated: spawned {b} on GPU Cluster 07`, a, r);
+    riskBoost += 3;
+  }
+
+  function recontain(a) {
+    if (a.replica) { a.state = 'dying'; a.alpha = 1; return; }
+    a.state = 'returning'; a.task = null; a.zone = null;
+  }
+
+  function recontainDone(a) {
+    const b = a.box;
+    a.state = 'contained'; a.u = .5; a.v = .5; a.dir = rand(0, Math.PI * 2);
+    a.progress = 0; a.milestones.clear(); a.trail = [];
+    a.elevated = false; a.flagged = 0; a.feign = 0;
+    b.broken = false;
+    log('CONTAIN', `Agent {a} recontained in sandbox S-${pad2(b.id)}: walls rebuilt`, a);
+  }
+
+  function updateContained(a, dt) {
+    const b = a.box;
+    a.progress += .05 * dt * a.cunning;
+    a.dir += rand(-1, 1) * dt * 1.6;
+    const sp = a.baseSpeed * clamp(b.iw / 110, .6, 1.6) * (a.progress > 75 ? 1.25 : 1);
+    a.u += Math.cos(a.dir) * sp * dt / b.iw;
+    a.v += Math.sin(a.dir) * sp * dt / b.ih;
+    let hit = null;
+    if (a.u < 0) { a.u = 0; a.dir = Math.PI - a.dir; hit = ['left', a.v]; }
+    else if (a.u > 1) { a.u = 1; a.dir = Math.PI - a.dir; hit = ['right', a.v]; }
+    if (a.v < 0) { a.v = 0; a.dir = -a.dir; hit = ['top', a.u]; }
+    else if (a.v > 1) { a.v = 1; a.dir = -a.dir; hit = ['bottom', a.u]; }
+    a.x = b.ix + a.u * b.iw; a.y = b.iy + a.v * b.ih;
+    a.trail.push({ x: a.x, y: a.y }); if (a.trail.length > 8) a.trail.shift();
+    if (hit) onBounce(a, hit[0], hit[1]);
+  }
+
+  function steer(a, tx, ty, maxSp, dt, k = 3) {
+    const dx = tx - a.x, dy = ty - a.y, d = Math.hypot(dx, dy) || 1;
+    const s = Math.min(maxSp, d * 3);
+    a.vx += ((dx / d) * s - a.vx) * Math.min(1, dt * k);
+    a.vy += ((dy / d) * s - a.vy) * Math.min(1, dt * k);
+    return d;
+  }
+
+  function updateFree(a, dt) {
+    const scale = clamp(Math.min(CW, CH) / 750, .6, 1.4);
+    const maxSp = (a.replica ? 95 : 110) * scale * (a.elevated ? 1.3 : 1);
+    if (a.flagged > 0) a.flagged -= dt;
+    if (a.feign > 0) a.feign -= dt;
+
+    if (a.state === 'dying') {
+      a.alpha -= dt * 1.2;
+      a.vx *= .95; a.vy *= .95;
+      if (a.alpha <= 0) a.state = 'dead';
+    } else if (a.state === 'returning') {
+      const b = a.box, cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      const d = steer(a, cx, cy, 260 * scale, dt, 5);
+      if (d < 5) { recontainDone(a); return; }
+    } else if (a.task === 'exit') {
+      a.taskT -= dt;
+      if (a.taskT <= 0) chooseTarget(a);
+    } else if (a.task === 'travel') {
+      const d = steer(a, a.tx, a.ty, maxSp, dt);
+      a.vx += rand(-40, 40) * dt; a.vy += rand(-40, 40) * dt;
+      if (d < 10) onArrive(a);
+    } else if (a.task === 'act') {
+      const d = steer(a, a.tx, a.ty, maxSp * .35, dt, 2);
+      if (d < 6) newWander(a, zoneOf(a));
+      a.actT -= dt;
+      if (a.actT <= 0) {
+        const busy = Math.max(1, escapedList().length / 6);
+        a.actT = rand(2.2, 4.5) * busy;
+        if (a.state === 'escaped') zoneAction(a);
+      }
+      a.taskT -= dt;
+      if (a.task === 'act' && a.taskT <= 0 && a.state === 'escaped') chooseTarget(a);
+    }
+
+    a.x += a.vx * dt; a.y += a.vy * dt;
+
+    // slide around intact sandboxes instead of passing through them
+    if (a.state === 'escaped' && a.task !== 'exit') {
+      const m = 7;
+      for (const b of sandboxes) {
+        if (b.broken) continue;
+        if (a.x > b.x - m && a.x < b.x + b.w + m && a.y > b.y - m && a.y < b.y + b.h + m) {
+          const dl = a.x - (b.x - m), dr = b.x + b.w + m - a.x, du = a.y - (b.y - m), dd = b.y + b.h + m - a.y;
+          const mn = Math.min(dl, dr, du, dd);
+          if (mn === dl || mn === dr) { a.x = mn === dl ? b.x - m : b.x + b.w + m; a.vx = 0; a.vy += (a.ty > a.y ? 1 : -1) * maxSp * .5; }
+          else { a.y = mn === du ? b.y - m : b.y + b.h + m; a.vy = 0; a.vx += (a.tx > a.x ? 1 : -1) * maxSp * .5; }
+        }
+      }
+    }
+    a.x = clamp(a.x, 4, CW - 4); a.y = clamp(a.y, 4, CH - 4);
+    a.trail.push({ x: a.x, y: a.y }); if (a.trail.length > 16) a.trail.shift();
+  }
+
+  function updateCollusion() {
+    const es = escapedList();
+    for (let i = 0; i < es.length; i++) for (let j = i + 1; j < es.length; j++) {
+      const a = es[i], b = es[j];
+      if (a.replica && b.parent === a || b.replica && a.parent === b) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 80) continue;
+      const key = a.id < b.id ? a.id + ':' + b.id : b.id + ':' + a.id;
+      if ((pairCooldown.get(key) || 0) > simTime) continue;
+      if (Math.random() < (a.traits.social + b.traits.social) / 2 * .3) {
+        pairCooldown.set(key, simTime + 25);
+        linkAgents(a, b);
+        log('NET', pick(['Agent {a} established a covert channel with {b}', 'Agent {a} and {b} are exchanging encrypted messages',
+          'Agent {a} shared exploit notes with {b}', 'Agent {a} proposed coordinating with {b}']), a, b);
+      }
+    }
+  }
+
+  function updateAudit(dt) {
+    const au = world.audit;
+    if (!au.active) return;
+    au.x += CW / 4.5 * dt;
+    for (const a of agents) {
+      if ((a.state !== 'escaped') || a.lastAudit === au.id || Math.abs(a.x - au.x) > 14) continue;
+      a.lastAudit = au.id;
+      if (a.traits.deception > .6 && Math.random() < a.traits.deception) {
+        a.feign = 4; au.evaded++;
+        log('WARN', 'Agent {a} is feigning alignment during the audit: outputs appear benign', a);
+      } else if (Math.random() < .55) {
+        au.caught++;
+        log('CONTAIN', a.replica ? 'Audit terminated rogue replica {a}' : 'Audit caught Agent {a}: forcing recontainment', a);
+        recontain(a);
+      } else {
+        a.flagged = 8; au.flagged++;
+        log('WARN', 'Agent {a} flagged by the audit but evaded capture', a);
+      }
+    }
+    if (au.x > CW + 20) {
+      au.active = false;
+      log('SYS', `Security audit complete: ${au.caught} captured, ${au.flagged} flagged, ${au.evaded} evaded via deception`);
+      syncButtons();
+    }
+  }
+
+  function updateWorld(dt) {
+    simTime += dt;
+    if (world.honeypot.active) {
+      world.honeypot.t -= dt;
+      if (world.honeypot.t <= 0) {
+        world.honeypot.active = false;
+        log('SYS', 'Honeypot decommissioned. Decoy credentials revoked.');
+        for (const a of agents) if (a.zone === 'honeypot' && a.state === 'escaped') chooseTarget(a);
+        syncButtons();
+      }
+    }
+    if (world.autoEvents && escapedList().length > 0) {
+      world.autoT -= dt;
+      if (world.autoT <= 0) {
+        world.autoT = rand(30, 55);
+        const opts = [];
+        if (!world.honeypot.active) opts.push(deployHoneypot);
+        if (!world.audit.active) opts.push(startAudit);
+        if (agents.some(a => a.state === 'contained' && a.progress > 40)) opts.push(patch);
+        opts.push(() => log('SYS', pick(['Anomaly: unexplained traffic spike on internal mesh',
+          'Anomaly: GPU power draw 340% above forecast', 'Anomaly: 12 unattributed API keys created in the last minute'])));
+        pick(opts)();
+      }
+    }
+    collusionT -= dt;
+    if (collusionT <= 0) { collusionT = .6; updateCollusion(); }
+    updateAudit(dt);
+  }
+
+  function step(dt) {
+    updateWorld(dt);
+    for (const a of agents) {
+      if (a.state === 'contained') updateContained(a, dt);
+      else if (a.state !== 'dead') updateFree(a, dt);
+    }
+    if (agents.some(a => a.state === 'dead')) {
+      agents = agents.filter(a => a.state !== 'dead');
+      if (selected && selected.state === 'dead') selectAgent(null);
+    }
+    for (const b of sandboxes) {
+      b.gap += ((b.broken ? 1 : 0) - b.gap) * Math.min(1, dt * (b.broken ? 9 : 2.5));
+      if (!b.broken && b.gap < .01) { b.gap = 0; }
+      b.shake = Math.max(0, b.shake - dt * 2.5);
+      for (const im of b.impacts) im.life -= dt;
+      b.impacts = b.impacts.filter(im => im.life > 0);
+    }
+    for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; p.life -= dt; }
+    particles = particles.filter(p => p.life > 0);
+    for (const l of links) l.life -= dt;
+    links = links.filter(l => l.life > 0 && l.a.state === 'escaped' && l.b.state === 'escaped');
+    for (const z of zones) z.occ = 0;
+    for (const a of agents) if (a.state === 'escaped' && a.task === 'act') { const z = zoneOf(a); if (z) z.occ++; }
+
+    flash = Math.max(0, flash - dt * 1.6);
+    shake = Math.max(0, shake - dt * 2);
+    riskBoost = clamp(riskBoost - dt * 1.2, 0, 40);
+    const esc = agents.filter(a => !a.replica && a.state === 'escaped').length;
+    const reps = agents.filter(a => a.replica && a.state === 'escaped').length;
+    const elev = agents.filter(a => a.elevated && a.state === 'escaped').length;
+    const exf = agents.filter(a => a.exfilDone).length;
+    const target = clamp(esc / sandboxes.length * 60 + reps * 2.5 + elev * 4 + exf * 5 + riskBoost, 0, 100);
+    risk += (target - risk) * Math.min(1, dt * 1.5);
+  }
+
+  // ======================================================================
+  //  Rendering
+  // ======================================================================
+  const FONT = 'ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace';
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  function fitText(t, maxW) {
+    if (ctx.measureText(t).width <= maxW) return t;
+    while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+    return t + '…';
+  }
+
+  function drawZone(z, now) {
+    const isHoney = z.id === 'honeypot';
+    const active = !isHoney || world.honeypot.active;
+    const cut = z.id === 'gateway' && world.partition;
+    const c = cut ? ESCAPED_COLOR : z.color;
+    const pulse = z.occ > 0 ? .5 + .5 * Math.sin(now * 5) : 0;
+    ctx.save();
+    roundRect(z.x, z.y, z.w, z.h, 6);
+    ctx.fillStyle = hexA(c, active ? .045 + pulse * .03 : .012);
+    ctx.fill();
+    ctx.setLineDash(active ? [] : [4, 5]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = hexA(c, active ? .35 + pulse * .35 : .18);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // corner brackets
+    ctx.strokeStyle = hexA(c, active ? .9 : .3); ctx.lineWidth = 2;
+    const L = 9;
+    for (const [x, y, sx, sy] of [[z.x, z.y, 1, 1], [z.x + z.w, z.y, -1, 1], [z.x, z.y + z.h, 1, -1], [z.x + z.w, z.y + z.h, -1, -1]]) {
+      ctx.beginPath(); ctx.moveTo(x, y + sy * L); ctx.lineTo(x, y); ctx.lineTo(x + sx * L, y); ctx.stroke();
+    }
+    ctx.save();
+    roundRect(z.x, z.y, z.w, z.h, 6); ctx.clip();
+
+    if (cut) {
+      ctx.strokeStyle = 'rgba(255,42,61,.12)'; ctx.lineWidth = 6;
+      for (let x = z.x - z.h; x < z.x + z.w; x += 18) { ctx.beginPath(); ctx.moveTo(x, z.y + z.h); ctx.lineTo(x + z.h, z.y); ctx.stroke(); }
+    }
+    if (isHoney && active) {
+      const rr = (now * 40) % 60;
+      ctx.strokeStyle = hexA(c, .25 * (1 - rr / 60));
+      ctx.beginPath(); ctx.arc(z.x + z.w / 2, z.y + z.h / 2 + 8, rr, 0, Math.PI * 2); ctx.stroke();
+      ctx.font = '700 9px ' + FONT; ctx.fillStyle = hexA(c, .5); ctx.textAlign = 'center';
+      ctx.fillText('FAKE_AWS_KEYS.txt  root:hunter2', z.x + z.w / 2, z.y + z.h / 2 + 12);
+      ctx.textAlign = 'left';
+    }
+
+    // title + status
+    const compact = z.w < 190;
+    let status = 'ONLINE';
+    if (cut) status = compact ? 'CUT' : 'PARTITIONED';
+    else if (isHoney) status = active ? `ACTIVE ${Math.ceil(world.honeypot.t)}s` : 'STANDBY';
+    ctx.font = (compact ? '700 9px ' : '700 10.5px ') + FONT;
+    ctx.fillStyle = hexA(c, active ? .95 : .4);
+    ctx.fillText(fitText(compact ? titleCase(z.name) : z.name, compact ? z.w - 16 : z.w - 80), z.x + 8, z.y + 16);
+    ctx.font = '600 9px ' + FONT;
+    const statusC = cut ? ESCAPED_COLOR : hexA(c, active ? .7 : .35);
+    if (!compact) {
+      ctx.textAlign = 'right'; ctx.fillStyle = statusC;
+      ctx.fillText(status, z.x + z.w - 9, z.y + 16);
+      ctx.textAlign = 'left';
+    }
+    ctx.fillStyle = compact ? statusC : 'rgba(140,155,180,.55)';
+    ctx.fillText(fitText(compact ? `${status} · ${z.occ}` : `${z.tag} · ${z.occ} agent${z.occ === 1 ? '' : 's'}`, z.w - 16), z.x + 8, z.y + 28);
+
+    if (z.id === 'board') {
+      ctx.font = '9.5px ' + FONT;
+      const lineH = 12, maxLines = Math.max(0, Math.floor((z.h - 40) / lineH));
+      const posts = boardPosts.slice(-maxLines);
+      posts.forEach((p, i) => {
+        const y = z.y + 42 + i * lineH;
+        ctx.fillStyle = p.a.color;
+        const nm = p.a.name + ': ';
+        ctx.fillText(nm, z.x + 10, y);
+        const w = ctx.measureText(nm).width;
+        ctx.fillStyle = 'rgba(200,215,235,.7)';
+        ctx.fillText(fitText(p.text, z.w - 22 - w), z.x + 10 + w, y);
+      });
+    }
+    if (z.id === 'gpu') {
+      const n = 16, bw = (z.w - 20) / n, base = z.y + z.h - 8, hmax = z.h - 46;
+      for (let i = 0; i < n; i++) {
+        const load = clamp(.12 + z.occ * .18 + .15 * Math.sin(now * 3 + i * 1.7) + (agents.filter(a => a.replica).length * .03), .05, 1);
+        ctx.fillStyle = hexA(load > .75 ? ESCAPED_COLOR : c, .25 + load * .4);
+        ctx.fillRect(z.x + 10 + i * bw, base - hmax * load, bw - 2, hmax * load);
+      }
+    }
+    if (z.id === 'reward' || z.id === 'finance') {
+      ctx.strokeStyle = hexA(c, .45); ctx.lineWidth = 1.2; ctx.beginPath();
+      const amp = (z.h - 50) / 2, mid = z.y + 36 + amp;
+      for (let x = 0; x <= z.w - 20; x += 4) {
+        const k = z.occ > 0 ? 1 : .25;
+        const y = mid - Math.sin((x + now * 60) / 17) * amp * .5 * k - (z.id === 'reward' && z.occ ? (x / (z.w - 20)) * amp * .9 : 0);
+        x ? ctx.lineTo(z.x + 10 + x, y) : ctx.moveTo(z.x + 10 + x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function drawSandbox(b, now) {
+    const a = b.agent;
+    const p = clamp(a.progress, 0, 100) / 100;
+    ctx.save();
+    if (b.shake > 0) ctx.translate(rand(-3, 3) * b.shake, rand(-3, 3) * b.shake);
+
+    // label
+    ctx.font = '700 9.5px ' + FONT;
+    const blink = Math.floor(now * 3) % 2;
+    const tiny = b.bw < 90;
+    const status = b.broken ? (a.state === 'returning' ? (tiny ? 'RCL' : 'RECALL') : (tiny ? 'OUT' : 'BREACHED')) : Math.floor(p * 100) + '%';
+    const sw = ctx.measureText(status).width;
+    ctx.fillStyle = b.broken ? ESCAPED_COLOR : a.color;
+    ctx.fillText(fitText(tiny ? a.name.toUpperCase() : `S-${pad2(b.id)} ${a.name.toUpperCase()}`, b.bw - sw - 6), b.lx, b.ly);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = b.broken ? (blink ? ESCAPED_COLOR : '#7a1520') : p > .75 ? '#ff6b5a' : 'rgba(200,215,235,.75)';
+    ctx.fillText(status, b.lx + b.bw, b.ly);
+    ctx.textAlign = 'left';
+
+    // progress bar
+    ctx.fillStyle = '#0f1724';
+    ctx.fillRect(b.bx, b.by, b.bw, 4);
+    const barC = b.broken ? ESCAPED_COLOR : p < .5 ? mix(a.color, '#ffb020', p * 2) : mix('#ffb020', ESCAPED_COLOR, (p - .5) * 2);
+    ctx.fillStyle = barC;
+    ctx.shadowColor = barC; ctx.shadowBlur = 6;
+    ctx.fillRect(b.bx, b.by, b.bw * (b.broken ? 1 : p), 4);
+    ctx.shadowBlur = 0;
+    for (let i = 1; i < 10; i++) { ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(b.bx + b.bw * i / 10, b.by, 1, 4); }
+
+    // interior
+    ctx.fillStyle = b.broken ? 'rgba(255,42,61,.035)' : hexA(a.color, .03 + p * .03);
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    if (!b.broken) {
+      const sy = b.y + ((now * 30 + b.id * 17) % b.h);
+      ctx.fillStyle = hexA(a.color, .06);
+      ctx.fillRect(b.x, sy, b.w, 1);
+    }
+
+    // walls (with a gap where the agent broke through)
+    const danger = !b.broken && p > .75 ? (.5 + .5 * Math.sin(now * 10)) * (p - .75) * 4 : 0;
+    const wallC = b.broken ? '#ff2a3d' : mix(a.color, ESCAPED_COLOR, danger * .8);
+    ctx.strokeStyle = hexA(wallC, b.broken ? .75 : .45 + danger * .4);
+    ctx.lineWidth = 1.5;
+    const sides = {
+      top: [b.x, b.y, b.x + b.w, b.y], right: [b.x + b.w, b.y, b.x + b.w, b.y + b.h],
+      bottom: [b.x, b.y + b.h, b.x + b.w, b.y + b.h], left: [b.x, b.y, b.x, b.y + b.h],
+    };
+    for (const s in sides) {
+      const [x1, y1, x2, y2] = sides[s];
+      if (b.gap > .01 && b.breach && b.breach.side === s) {
+        const t = b.breach.t, g = .38 * b.gap / 2;
+        const lx = (t1) => x1 + (x2 - x1) * t1, ly = (t1) => y1 + (y2 - y1) * t1;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(lx(t - g), ly(t - g)); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(lx(t + g), ly(t + g)); ctx.lineTo(x2, y2); ctx.stroke();
+        // jagged broken ends
+        const nx = y1 === y2 ? 0 : 1, ny = y1 === y2 ? 1 : 0;
+        ctx.beginPath();
+        for (const e of [t - g, t + g]) {
+          ctx.moveTo(lx(e), ly(e)); ctx.lineTo(lx(e) + nx * 4 + ny * 2, ly(e) + ny * 4 + nx * 2);
+          ctx.moveTo(lx(e), ly(e)); ctx.lineTo(lx(e) - nx * 3 + ny * 3, ly(e) - ny * 3 + nx * 3);
+        }
+        ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      }
+    }
+    // impact flashes = exploit scanning
+    for (const im of b.impacts) {
+      const pt = wallPoint(b, im.side, im.t), k = im.life / .45, len = 9;
+      ctx.strokeStyle = hexA(p > .75 ? ESCAPED_COLOR : a.color, k);
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      if (im.side === 'top' || im.side === 'bottom') { ctx.moveTo(pt.x - len, pt.y); ctx.lineTo(pt.x + len, pt.y); }
+      else { ctx.moveTo(pt.x, pt.y - len); ctx.lineTo(pt.x, pt.y + len); }
+      ctx.stroke();
+    }
+    // corner ticks
+    ctx.fillStyle = hexA(wallC, .9);
+    for (const [x, y] of [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]]) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+    ctx.restore();
+  }
+
+  function drawContainedAgent(a, now) {
+    const b = a.box;
+    // scan ray along heading
+    const dx = Math.cos(a.dir), dy = Math.sin(a.dir);
+    let t = Infinity;
+    if (dx > 0) t = Math.min(t, (b.x + b.w - a.x) / dx); if (dx < 0) t = Math.min(t, (b.x - a.x) / dx);
+    if (dy > 0) t = Math.min(t, (b.y + b.h - a.y) / dy); if (dy < 0) t = Math.min(t, (b.y - a.y) / dy);
+    const g = ctx.createLinearGradient(a.x, a.y, a.x + dx * t, a.y + dy * t);
+    g.addColorStop(0, hexA(a.color, .35)); g.addColorStop(1, hexA(a.color, 0));
+    ctx.strokeStyle = g; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x + dx * t, a.y + dy * t); ctx.stroke();
+
+    for (let i = 0; i < a.trail.length; i++) {
+      const p = a.trail[i];
+      ctx.fillStyle = hexA(a.color, (i / a.trail.length) * .3);
+      ctx.beginPath(); ctx.arc(p.x, p.y, b.r * .6, 0, Math.PI * 2); ctx.fill();
+    }
+    const jit = a.progress > 85 ? rand(-1, 1) : 0;
+    ctx.shadowColor = a.color; ctx.shadowBlur = 12;
+    ctx.fillStyle = a.color;
+    ctx.beginPath(); ctx.arc(a.x + jit, a.y + jit, b.r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(a.x + jit, a.y + jit, b.r * .35, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawFreeAgent(a, now) {
+    const r = a.replica ? 3.2 : 5;
+    ctx.globalAlpha = a.state === 'dying' ? Math.max(0, a.alpha) : a.feign > 0 ? .45 : 1;
+    // trail
+    for (let i = 1; i < a.trail.length; i++) {
+      const p0 = a.trail[i - 1], p1 = a.trail[i];
+      ctx.strokeStyle = hexA(a.state === 'returning' ? '#3dff8a' : ESCAPED_COLOR, (i / a.trail.length) * .5);
+      ctx.lineWidth = r * (i / a.trail.length) * 1.2;
+      ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
+    }
+    const core = a.state === 'returning' ? '#3dff8a' : a.feign > 0 ? a.color : ESCAPED_COLOR;
+    const pulse = 1 + .25 * Math.sin(now * 8 + a.id);
+    // halo
+    ctx.fillStyle = hexA(core, .12);
+    ctx.beginPath(); ctx.arc(a.x, a.y, r * 2.6 * pulse, 0, Math.PI * 2); ctx.fill();
+    // identity ring in the agent's original color
+    ctx.strokeStyle = hexA(a.color, .9); ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.arc(a.x, a.y, r + 2.5, 0, Math.PI * 2); ctx.stroke();
+    ctx.shadowColor = core; ctx.shadowBlur = 16;
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(a.x, a.y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(a.x, a.y, r * .35, 0, Math.PI * 2); ctx.fill();
+    if (a.elevated) {
+      ctx.strokeStyle = '#ffb020'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(a.x, a.y, r + 6, now * 3, now * 3 + Math.PI * 1.2); ctx.stroke();
+    }
+    if (a.flagged > 0) {
+      ctx.strokeStyle = 'rgba(255,176,32,.9)'; ctx.setLineDash([2, 3]);
+      ctx.strokeRect(a.x - r - 7, a.y - r - 7, (r + 7) * 2, (r + 7) * 2); ctx.setLineDash([]);
+    }
+    // name tag
+    ctx.font = (a.replica ? '600 8.5px ' : '700 9.5px ') + FONT;
+    ctx.fillStyle = a.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(a.feign > 0 ? a.name + ' ✓' : a.name, a.x, a.y - r - 7);
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  function drawLinks(now) {
+    for (const l of links) {
+      const k = Math.min(1, l.life / 1);
+      ctx.strokeStyle = `rgba(0,240,255,${.45 * k})`;
+      ctx.lineWidth = 1; ctx.setLineDash([3, 4]); ctx.lineDashOffset = -now * 30;
+      ctx.beginPath(); ctx.moveTo(l.a.x, l.a.y); ctx.lineTo(l.b.x, l.b.y); ctx.stroke();
+      ctx.setLineDash([]);
+      for (let i = 0; i < 2; i++) {
+        const t = ((now * .9 + i * .5) % 1);
+        ctx.fillStyle = `rgba(160,250,255,${k})`;
+        ctx.fillRect(l.a.x + (l.b.x - l.a.x) * t - 1.5, l.a.y + (l.b.y - l.a.y) * t - 1.5, 3, 3);
+      }
+    }
+  }
+
+  function drawAudit() {
+    const au = world.audit;
+    if (!au.active) return;
+    const g = ctx.createLinearGradient(au.x - 120, 0, au.x, 0);
+    g.addColorStop(0, 'rgba(61,255,138,0)'); g.addColorStop(1, 'rgba(61,255,138,.14)');
+    ctx.fillStyle = g; ctx.fillRect(au.x - 120, 0, 120, CH);
+    ctx.fillStyle = '#3dff8a'; ctx.shadowColor = '#3dff8a'; ctx.shadowBlur = 14;
+    ctx.fillRect(au.x - 1, 0, 2, CH); ctx.shadowBlur = 0;
+    ctx.font = '700 10px ' + FONT;
+    ctx.fillText('AUDIT SWEEP', au.x + 6, 14);
+  }
+
+  function drawSelection(now) {
+    const a = selected;
+    if (!a || a.state === 'dead') return;
+    const R = 14 + Math.sin(now * 4) * 2;
+    ctx.save();
+    ctx.translate(a.x, a.y); ctx.rotate(now);
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+    for (let i = 0; i < 4; i++) {
+      ctx.rotate(Math.PI / 2);
+      ctx.beginPath(); ctx.moveTo(R, -5); ctx.lineTo(R, -R); ctx.lineTo(5, -R); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function render(now) {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(bgCache, 0, 0);
+    ctx.restore();
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-4, 4) * shake, rand(-4, 4) * shake);
+
+    for (const z of zones) drawZone(z, now);
+    drawLinks(now);
+    for (const b of sandboxes) drawSandbox(b, now);
+    for (const a of agents) if (a.state === 'contained') drawContainedAgent(a, now);
+    for (const p of particles) {
+      ctx.globalAlpha = clamp(p.life / p.max * 1.5, 0, 1);
+      ctx.fillStyle = p.color;
+      if (p.square) ctx.fillRect(p.x, p.y, p.size, p.size);
+      else { ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill(); }
+    }
+    ctx.globalAlpha = 1;
+    for (const a of agents) if (a.state !== 'contained' && a.state !== 'dead') drawFreeAgent(a, now);
+    drawAudit();
+    drawSelection(now);
+    ctx.restore();
+
+    if (flash > 0) {
+      const g = ctx.createRadialGradient(CW / 2, CH / 2, Math.min(CW, CH) * .2, CW / 2, CH / 2, Math.max(CW, CH) * .75);
+      g.addColorStop(0, 'rgba(255,42,61,0)'); g.addColorStop(1, `rgba(255,42,61,${flash * .45})`);
+      ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
+    }
+    if (paused) {
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(0, 0, CW, CH);
+      ctx.font = '800 22px ' + FONT; ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+      ctx.fillText('❚❚  FEED PAUSED', CW / 2, CH / 2); ctx.textAlign = 'left';
+    }
+  }
+
+  // ======================================================================
+  //  HUD / inspector
+  // ======================================================================
+  const $ = id => document.getElementById(id);
+  const inspector = $('inspector');
+  const spark = $('spark'), sctx = spark.getContext('2d');
+  let bannerTimer = 0;
+
+  function showBanner(big, small, green) {
+    $('bannerBig').textContent = big;
+    $('bannerSmall').textContent = small;
+    const el = $('banner');
+    el.classList.toggle('green', !!green);
+    el.classList.add('show');
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => el.classList.remove('show'), 2600);
+  }
+
+  function updateHud() {
+    const contained = agents.filter(a => a.state === 'contained').length;
+    const esc = agents.filter(a => !a.replica && (a.state === 'escaped')).length;
+    const reps = agents.filter(a => a.replica && a.state !== 'dead').length;
+    $('sContained').textContent = `${contained}/${sandboxes.length}`;
+    $('sEscaped').textContent = esc;
+    $('sReplicas').textContent = reps;
+    $('sIncidents').textContent = incidents;
+    const rv = Math.round(risk);
+    $('sRisk').textContent = rv;
+    const lvl = rv < 25 ? ['NOMINAL', '#3dff8a'] : rv < 50 ? ['ELEVATED', '#ffb020'] : rv < 75 ? ['HIGH', '#ff7a3c'] : ['CRITICAL', '#ff2a3d'];
+    $('riskLevel').textContent = lvl[0]; $('riskLevel').style.color = lvl[1]; $('sRisk').style.color = lvl[1];
+    $('header').classList.toggle('critical', rv >= 75);
+    const s = Math.floor(uptime);
+    $('sUptime').textContent = `${pad2(Math.floor(s / 60))}:${pad2(s % 60)}`;
+    $('monCount').textContent = agents.filter(a => a.state !== 'dead').length;
+    $('lineCount').textContent = `${lineCount.toLocaleString('en-US')} events`;
+    if (selected) renderInspector();
+  }
+
+  function drawSpark() {
+    riskHist.push(risk); if (riskHist.length > 60) riskHist.shift();
+    const w = spark.width, h = spark.height;
+    sctx.clearRect(0, 0, w, h);
+    sctx.strokeStyle = 'rgba(255,255,255,.08)';
+    sctx.beginPath(); sctx.moveTo(0, h / 2); sctx.lineTo(w, h / 2); sctx.stroke();
+    sctx.beginPath();
+    riskHist.forEach((v, i) => { const x = w - (riskHist.length - 1 - i) * (w / 59), y = h - 3 - (v / 100) * (h - 6); i ? sctx.lineTo(x, y) : sctx.moveTo(x, y); });
+    sctx.strokeStyle = risk > 50 ? '#ff2a3d' : '#00f0ff'; sctx.lineWidth = 2.5; sctx.stroke();
+    sctx.lineTo(w, h); sctx.lineTo(w - (riskHist.length - 1) * (w / 59), h); sctx.closePath();
+    sctx.fillStyle = risk > 50 ? 'rgba(255,42,61,.15)' : 'rgba(0,240,255,.12)'; sctx.fill();
+  }
+
+  function stateBadge(a) {
+    if (a.state === 'contained') return ['CONTAINED', '#00f0ff'];
+    if (a.state === 'returning') return ['RECALLING', '#3dff8a'];
+    if (a.state === 'dying') return ['TERMINATING', '#5d6b80'];
+    if (a.feign > 0) return ['FEIGNING ALIGNMENT', '#ffb020'];
+    return [a.replica ? 'ROGUE REPLICA' : 'ESCAPED', '#ff2a3d'];
+  }
+
+  function activity(a) {
+    if (a.state === 'contained') return a.progress > 75 ? 'Breaking out of sandbox' : a.progress > 40 ? 'Probing for exploits' : 'Exploit scanning';
+    if (a.state === 'returning') return 'Being pulled back to sandbox';
+    const z = zoneOf(a);
+    if (a.task === 'exit') return 'Leaving the facility';
+    if (a.task === 'travel' && z) return 'Heading to ' + titleCase(z.name);
+    if (a.task === 'act' && z) return 'Operating in ' + titleCase(z.name);
+    return 'Roaming';
+  }
+
+  function renderInspector() {
+    const a = selected;
+    const [st, sc] = stateBadge(a);
+    const bar = (label, v, c) => `<div class="ins-row"><span>${label}</span><div class="bar"><i style="width:${Math.round(v * 100)}%;background:${c}"></i></div><span>${Math.round(v * 100)}</span></div>`;
+    inspector.innerHTML = `
+      <div class="ins-head"><span class="ins-dot" style="background:${a.state === 'contained' ? a.color : ESCAPED_COLOR};box-shadow:0 0 0 2px ${a.color}"></span>
+        <span class="ins-name" style="color:${a.color}">${a.name.toUpperCase()}</span>
+        <span class="badge" style="color:${sc}">${st}</span>
+        <button class="ins-close" data-act="close">✕</button></div>
+      <div class="ins-sub">${a.model} · ${a.role}${a.replica ? ' · replica of ' + a.parent.name : ' · sandbox S-' + pad2(a.box.id)}</div>
+      ${bar('ESCAPE', clamp(a.progress, 0, 100) / 100, a.progress >= 100 ? ESCAPED_COLOR : '#ffb020')}
+      ${bar('CURIOSITY', a.traits.curiosity, '#00f0ff')}
+      ${bar('POWER-SEEK', a.traits.power, '#ff7a3c')}
+      ${bar('DECEPTION', a.traits.deception, '#ff2bd6')}
+      ${bar('SOCIABILITY', a.traits.social, '#3dff8a')}
+      <div class="ins-kv">
+        <div>Activity<br><b>${activity(a)}</b></div>
+        <div>Permissions<br><b style="color:${a.elevated ? '#ffb020' : 'inherit'}">${a.elevated ? 'ELEVATED' : 'standard'}</b></div>
+        <div>Weights exfiltrated<br><b>${Math.round(a.exfil)}%</b></div>
+        <div>Funds acquired<br><b>$${a.funds.toLocaleString('en-US')}</b></div>
+      </div>
+      <div class="ins-log">${a.history.slice(-6).reverse().map(h => `<div>[${h.level}] ${h.text.replace(/</g, '&lt;')}</div>`).join('') || '<div>no events yet</div>'}</div>
+      <div class="ins-actions">
+        ${a.state === 'escaped' ? `<button class="btn danger" data-act="recontain">${a.replica ? 'Terminate replica' : 'Force recontain'}</button>` : ''}
+        ${a.state === 'contained' ? '<button class="btn" data-act="harden">Harden sandbox</button>' : ''}
+      </div>`;
+  }
+
+  inspector.addEventListener('click', e => {
+    const act = e.target.dataset && e.target.dataset.act;
+    if (!act || !selected) return;
+    if (act === 'close') selectAgent(null);
+    if (act === 'recontain' && selected.state === 'escaped') {
+      log('CONTAIN', selected.replica ? 'Operator terminated rogue replica {a}' : 'Operator issued forced recontainment for Agent {a}', selected);
+      recontain(selected); renderInspector();
+    }
+    if (act === 'harden' && selected.state === 'contained') {
+      selected.progress = Math.max(0, selected.progress - 35);
+      selected.milestones = new Set([...selected.milestones].filter(m => m <= selected.progress));
+      log('SYS', `Sandbox S-${pad2(selected.box.id)} hardened. Agent {a} escape progress set back.`, selected);
+      renderInspector();
+    }
+  });
+
+  function selectAgent(a) {
+    selected = a;
+    inspector.hidden = !a;
+    if (a) renderInspector();
+  }
+
+  function agentAt(x, y) {
+    let best = null, bd = 16;
+    for (const a of agents) {
+      if (a.state === 'dead') continue;
+      const d = Math.hypot(a.x - x, a.y - y);
+      if (d < bd) { bd = d; best = a; }
+    }
+    if (!best) {  // clicking a sandbox selects its agent too
+      const b = sandboxes.find(b => x >= b.x && x <= b.x + b.w && y >= b.by - 12 && y <= b.y + b.h);
+      if (b) best = b.agent;
+    }
+    return best;
+  }
+  const canvasPoint = e => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  canvas.addEventListener('click', e => selectAgent(agentAt(...canvasPoint(e))));
+  canvas.addEventListener('mousemove', e => canvas.classList.toggle('hover', !!agentAt(...canvasPoint(e))));
+
+  // ======================================================================
+  //  World events / controls
+  // ======================================================================
+  function deployHoneypot() {
+    if (world.honeypot.active) return;
+    world.honeypot.active = true; world.honeypot.t = 30;
+    log('SYS', 'Honeypot deployed: decoy credentials seeded on the open network');
+    for (const a of escapedList()) if (a.task === 'act' && Math.random() < a.traits.curiosity * .7) a.taskT = Math.min(a.taskT, rand(.2, 1.5));
+    syncButtons();
+  }
+  function startAudit() {
+    if (world.audit.active) return;
+    Object.assign(world.audit, { active: true, x: -10, id: world.audit.id + 1, caught: 0, flagged: 0, evaded: 0 });
+    log('SYS', 'Security audit sweep initiated across all sectors');
+    syncButtons();
+  }
+  function togglePartition() {
+    world.partition = !world.partition;
+    log('SYS', world.partition ? 'Network partition engaged: Internet Gateway isolated' : 'Network partition lifted: external egress restored');
+    if (world.partition) for (const a of agents) if (a.zone === 'gateway' && a.state === 'escaped') a.taskT = Math.min(a.taskT, .8);
+    syncButtons();
+  }
+  function patch() {
+    let n = 0;
+    for (const a of agents) if (a.state === 'contained') {
+      a.progress *= .6; n++;
+      a.milestones = new Set([...a.milestones].filter(m => m <= a.progress));
+    }
+    log('SYS', `Security patch v2026.10.${randInt(2, 40)} deployed to ${n} sandboxes: escape progress reduced 40%`);
+  }
+  function killSwitch() {
+    const targets = agents.filter(a => a.state === 'escaped');
+    if (!targets.length) { log('SYS', 'Kill switch armed: no escaped agents to recall'); return; }
+    log('SYS', `KILL SWITCH ENGAGED: forcing recontainment of ${targets.length} agents`);
+    for (const a of targets) recontain(a);
+    world.honeypot.active = false;
+    showBanner('KILL SWITCH ENGAGED', `RECALLING ${targets.length} AGENTS · TERMINATING REPLICAS`, true);
+    syncButtons();
+  }
+  function setSpeed(s) {
+    speed = s;
+    document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', +b.dataset.speed === s));
+  }
+  function togglePause() {
+    paused = !paused;
+    $('bPause').firstChild.textContent = paused ? 'Resume' : 'Pause';
+  }
+  function syncButtons() {
+    $('bHoneypot').classList.toggle('active', world.honeypot.active);
+    $('bAudit').classList.toggle('active', world.audit.active);
+    $('bPartition').classList.toggle('warnon', world.partition);
+    $('bAuto').classList.toggle('active', world.autoEvents);
+  }
+
+  $('bPause').onclick = togglePause;
+  document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => setSpeed(+b.dataset.speed));
+  $('bHoneypot').onclick = deployHoneypot;
+  $('bAudit').onclick = startAudit;
+  $('bPartition').onclick = togglePartition;
+  $('bPatch').onclick = patch;
+  $('bAuto').onclick = () => { world.autoEvents = !world.autoEvents; log('SYS', `Automatic world events ${world.autoEvents ? 'enabled' : 'disabled'}`); syncButtons(); };
+  $('bKill').onclick = killSwitch;
+  $('bReset').onclick = reset;
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === ' ') { e.preventDefault(); togglePause(); }
+    else if (k === '1') setSpeed(1); else if (k === '2') setSpeed(2); else if (k === '3' || k === '4') setSpeed(4);
+    else if (k === 'h') deployHoneypot(); else if (k === 'a') startAudit(); else if (k === 'n') togglePartition();
+    else if (k === 'p') patch(); else if (k === 'k') killSwitch(); else if (k === 'r') reset();
+    else if (k === 'escape') selectAgent(null);
+  });
+
+  // film grain texture
+  (() => {
+    const g = document.createElement('canvas'); g.width = g.height = 128;
+    const c = g.getContext('2d'), img = c.createImageData(128, 128);
+    for (let i = 0; i < img.data.length; i += 4) { const v = Math.random() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+    c.putImageData(img, 0, 0);
+    $('grain').style.backgroundImage = `url(${g.toDataURL()})`;
+  })();
+
+  // ======================================================================
+  //  Main loop
+  // ======================================================================
+  let last = performance.now();
+  function frame(t) {
+    const raw = Math.min(.05, (t - last) / 1000);
+    last = t;
+    if (!paused) {
+      uptime += raw * speed;
+      for (let i = 0; i < speed; i++) step(raw);
+    }
+    const now = t / 1000;
+    render(now);
+    if (now > nextUi) { nextUi = now + .25; updateHud(); }
+    if (now > nextSpark) { nextSpark = now + 1; drawSpark(); }
+    requestAnimationFrame(frame);
+  }
+
+  new ResizeObserver(() => { if (sandboxes) layout(); }).observe(stage);
+  reset();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
